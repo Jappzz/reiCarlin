@@ -10,14 +10,15 @@ from django.contrib.auth import authenticate
 from .permissions import IsAdminOrEmployeeOrOwner
 
 class UserView(APIView):
+    def getPermissions(self):
+        if self.request.method == "POST":
+            return[AllowAny()]
+        return [ISAuthenticated(), IsAdminOrEmployeeOrOwner()]
+    
     def post(self, request:Request)->Response:
         serializer = UserSerializer(data = request.data)
-        serializer.isvalid(raise_exception=True)
-        if serializer.validated_data["is_employee"]:
-            serializer.validated_data["is1-superuser"] = True
-
+        serializer.is_valid(raise_exception=True)
         serializer.save()
-
         return Response(serializer.data, status.HTTP_201_CREATED)
 
     def get(self, request:Request)-> Response:
@@ -26,6 +27,9 @@ class UserView(APIView):
         return Response(serializer.data, status.HTTP_200_OK)
 
 class LoginView(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"
+
     def post(self, request: Request) -> Response:
         serializer = LoginSerializer(data = request.data)
         serializer.is_valid(raise_exception = True)
@@ -49,23 +53,27 @@ class UserDetailView(APIView):
     authentication_classes = (JWTAuthentication,)
     permission_classes = (IsAdminOrEmployeeOrOwner,)
     def get(self, request: Request, user_id:int)-> Response:
-        try:
-            found_user = User.objects.get(id = user_id)
-            self.check_object_permissions(request, found_user)
-
-        except User.DoesNotExist:
-            return Response({"detail": "User not found"}, status.HTTP_404_NOT_FOUND)
-
+        found_user = get_object_or_404(User, id=user_id)
+        self.check_object_permissions(request, found_user)
         serializer = UserSerializer(found_user)
         return Response(serializer.data, status.HTTP_200_OK)
 
-    def path(self, request: Request, user_id: int)->Response:
-        found_user= get_object_or_404(User.objects.all(), id = user_id)
-
+    def patch(self, request: Request, user_id: int) -> Response:
+        found_user = get_object_or_404(User, id=user_id)
         self.check_object_permissions(request, found_user)
-        serializer = UserSerializer(found_user, data=request.data, partial = True)
-        serializer.is_valid(raise_exception = True)
+        serializer = UserSerializer(found_user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
         serializer.save()
-
         return Response(serializer.data, status.HTTP_200_OK)
+
+class PromoteUserView(APIView):
+    authentication_classes = (JWTAuthentication,)
+    permission_classes = (IsAdminUser,)
+    def patch(self, request: Request, user_id: int) -> Response:
+        found_user = get_object_or_404(User, id=user_id)
+        serializer = PromoteUserSerializer(data = request.data)
+        serializer.is_valid(raise_exception = True)
+        found_user.is_employee = serializer.validated_data["is_employee"]
+        found_user.save(update_fields = ["is_employee"])
+        return Response(UserSerializer(found_user). data, status.HTTP_200_OK)
     
